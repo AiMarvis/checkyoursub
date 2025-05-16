@@ -11,19 +11,29 @@ import { ko } from "date-fns/locale"
 import BlogCard from "@/components/blog-card"
 
 export default function BlogPage() {
-  const { supabase } = useSupabase()
+  const { supabase, isLoading: sbIsLoading } = useSupabase()
   const [posts, setPosts] = useState([])
   const [tags, setTags] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedTag, setSelectedTag] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  console.log("BlogPage: Component rendered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+
   useEffect(() => {
-    fetchPosts()
-    fetchTags()
-  }, [])
+    console.log("BlogPage: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    
+    if (!sbIsLoading && supabase) {
+      console.log("BlogPage: Loading data - supabase is available and not loading");
+      fetchPosts()
+      fetchTags()
+    } else {
+      console.log("BlogPage: Waiting for supabase - sbIsLoading:", sbIsLoading);
+    }
+  }, [sbIsLoading, supabase])
 
   const fetchPosts = async () => {
+    console.log("BlogPage: fetchPosts called");
     setIsLoading(true)
     try {
       const { data, error } = await supabase
@@ -37,50 +47,49 @@ export default function BlogPage() {
       if (error) {
         // Check if the error is because the table doesn't exist
         if (error.message.includes("relation") && error.message.includes("does not exist")) {
-          console.error("Table 'blog_posts' does not exist. Database schema needs to be set up.")
+          console.error("BlogPage: Table 'blog_posts' does not exist. Database schema needs to be set up.")
           setPosts([])
         } else {
+          console.error("BlogPage: Error fetching posts:", error);
           throw error
         }
       } else {
+        console.log("BlogPage: Posts fetched successfully, count:", data?.length || 0);
         setPosts(data || [])
       }
     } catch (error) {
-      console.error("Error fetching posts:", error)
+      console.error("BlogPage: Exception in fetchPosts:", error)
     } finally {
       setIsLoading(false)
     }
   }
 
   const fetchTags = async () => {
+    console.log("BlogPage: fetchTags called");
     try {
-      const { data, error } = await supabase.from("tags").select("*").order("name")
+      const { data, error } = await supabase.from("tags").select("*")
 
       if (error) {
         // Check if the error is because the table doesn't exist
         if (error.message.includes("relation") && error.message.includes("does not exist")) {
-          console.error("Table 'tags' does not exist. Database schema needs to be set up.")
+          console.error("BlogPage: Table 'tags' does not exist. Database schema needs to be set up.")
           setTags([])
         } else {
+          console.error("BlogPage: Error fetching tags:", error);
           throw error
         }
       } else {
+        console.log("BlogPage: Tags fetched successfully, count:", data?.length || 0);
         setTags(data || [])
       }
     } catch (error) {
-      console.error("Error fetching tags:", error)
+      console.error("BlogPage: Exception in fetchTags:", error)
     }
   }
 
-  const filteredPosts = posts.filter((post) => {
-    const matchesSearch =
-      post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      post.summary.toLowerCase().includes(searchQuery.toLowerCase())
-
-    const matchesTag = !selectedTag || (post.tags && post.tags.includes(selectedTag))
-
-    return matchesSearch && matchesTag
-  })
+  const formatDate = (dateString) => {
+    return format(new Date(dateString), "yyyy년 MM월 dd일", { locale: ko })
+  }
 
   const handleSearchChange = (e) => {
     setSearchQuery(e.target.value)
@@ -90,47 +99,29 @@ export default function BlogPage() {
     setSelectedTag(selectedTag === tagId ? null : tagId)
   }
 
-  const formatDate = (dateString) => {
-    return format(new Date(dateString), "yyyy년 MM월 dd일", { locale: ko })
-  }
+  const filteredPosts = posts.filter((post) => {
+    // Filter by search query
+    const matchesSearch =
+      searchQuery === "" ||
+      post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      post.summary.toLowerCase().includes(searchQuery.toLowerCase())
+
+    // Filter by tag
+    const matchesTag = selectedTag === null || (post.tags && post.tags.includes(selectedTag))
+
+    return matchesSearch && matchesTag
+  })
 
   if (isLoading) {
+    console.log("BlogPage: Rendering loading spinner (isLoading is true)");
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
       </div>
     )
   }
 
-  if (posts.length === 0 && tags.length === 0) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">AI 툴 블로그</h1>
-          <p className="text-gray-600 dark:text-gray-300">AI 툴 사용에 관한 유용한 팁과 정보를 확인하세요.</p>
-        </div>
-
-        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-2">데이터베이스 설정 필요</h2>
-          <p className="mb-4">
-            데이터베이스 스키마가 아직 설정되지 않았습니다. Supabase 프로젝트에서 다음 단계를 완료해주세요:
-          </p>
-          <ol className="list-decimal pl-5 space-y-2 mb-4">
-            <li>Supabase 대시보드에 로그인하세요</li>
-            <li>프로젝트의 SQL 편집기로 이동하세요</li>
-            <li>
-              프로젝트의{" "}
-              <code className="bg-yellow-100 dark:bg-yellow-800 px-1 py-0.5 rounded">lib/supabase-schema.sql</code>{" "}
-              파일에 있는 SQL을 실행하세요
-            </li>
-            <li>페이지를 새로고침하세요</li>
-          </ol>
-          <p>데이터베이스 스키마를 설정한 후에는 관리자 계정을 통해 블로그 게시물과 태그를 추가할 수 있습니다.</p>
-        </div>
-      </div>
-    )
-  }
-
+  console.log("BlogPage: Rendering main content with posts:", filteredPosts.length);
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">

@@ -8,19 +8,29 @@ import { Search } from "lucide-react"
 import Card3D from "@/components/3d-card"
 
 export default function ToolsPage() {
-  const { supabase } = useSupabase()
+  const { supabase, isLoading: sbIsLoading } = useSupabase()
   const [tools, setTools] = useState([])
   const [categories, setCategories] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState("all")
 
+  console.log("ToolsPage: Component rendered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+
   useEffect(() => {
-    fetchTools()
-    fetchCategories()
-  }, [])
+    console.log("ToolsPage: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    
+    if (!sbIsLoading && supabase) {
+      console.log("ToolsPage: Loading data - supabase is available and not loading");
+      fetchTools()
+      fetchCategories()
+    } else {
+      console.log("ToolsPage: Waiting for supabase - sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    }
+  }, [sbIsLoading, supabase])
 
   const fetchTools = async () => {
+    console.log("ToolsPage: fetchTools called");
     setIsLoading(true)
     try {
       const { data, error } = await supabase.from("ai_tools").select("*").order("name")
@@ -28,38 +38,43 @@ export default function ToolsPage() {
       if (error) {
         // Check if the error is because the table doesn't exist
         if (error.message.includes("relation") && error.message.includes("does not exist")) {
-          console.error("Table 'ai_tools' does not exist. Database schema needs to be set up.")
+          console.error("ToolsPage: Table 'ai_tools' does not exist. Database schema needs to be set up.")
           setTools([])
         } else {
+          console.error("ToolsPage: Error fetching tools:", error)
           throw error
         }
       } else {
+        console.log("ToolsPage: Tools fetched successfully, count:", data?.length || 0);
         setTools(data || [])
       }
     } catch (error) {
-      console.error("Error fetching tools:", error)
+      console.error("ToolsPage: Exception in fetchTools:", error)
     } finally {
       setIsLoading(false)
     }
   }
 
   const fetchCategories = async () => {
+    console.log("ToolsPage: fetchCategories called");
     try {
       const { data, error } = await supabase.from("categories").select("*").order("name")
 
       if (error) {
         // Check if the error is because the table doesn't exist
         if (error.message.includes("relation") && error.message.includes("does not exist")) {
-          console.error("Table 'categories' does not exist. Database schema needs to be set up.")
+          console.error("ToolsPage: Table 'categories' does not exist. Database schema needs to be set up.")
           setCategories([])
         } else {
+          console.error("ToolsPage: Error fetching categories:", error)
           throw error
         }
       } else {
+        console.log("ToolsPage: Categories fetched successfully, count:", data?.length || 0);
         setCategories(data || [])
       }
     } catch (error) {
-      console.error("Error fetching categories:", error)
+      console.error("ToolsPage: Exception in fetchCategories:", error)
     }
   }
 
@@ -82,6 +97,7 @@ export default function ToolsPage() {
   }
 
   if (isLoading) {
+    console.log("ToolsPage: Rendering loading spinner (isLoading is true)");
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -89,36 +105,7 @@ export default function ToolsPage() {
     )
   }
 
-  if (tools.length === 0 && categories.length === 0) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold gradient-heading">AI 툴 목록</h1>
-          <p className="text-gray-400">다양한 AI 툴을 탐색하고 당신의 작업에 활용하세요.</p>
-        </div>
-
-        <div className="bg-[#0f172a] border border-gray-800 rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-2 text-white">데이터베이스 설정 필요</h2>
-          <p className="mb-4 text-gray-400">
-            데이터베이스 스키마가 아직 설정되지 않았습니다. Supabase 프로젝트에서 다음 단계를 완료해주세요:
-          </p>
-          <ol className="list-decimal pl-5 space-y-2 mb-4 text-gray-400">
-            <li>Supabase 대시보드에 로그인하세요</li>
-            <li>프로젝트의 SQL 편집기로 이동하세요</li>
-            <li>
-              프로젝트의 <code className="bg-gray-800 px-1 py-0.5 rounded text-blue-400">lib/supabase-schema.sql</code>{" "}
-              파일에 있는 SQL을 실행하세요
-            </li>
-            <li>페이지를 새로고침하세요</li>
-          </ol>
-          <p className="text-gray-400">
-            데이터베이스 스키마를 설정한 후에는 관리자 계정을 통해 AI 툴과 카테고리를 추가할 수 있습니다.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
+  console.log("ToolsPage: Rendering main content with tools:", tools.length);
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">

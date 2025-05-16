@@ -22,39 +22,82 @@ import {
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { supabase, isLoading } = useSupabase()
+  const { supabase, isLoading: sbIsLoading } = useSupabase()
   const { toast } = useToast()
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [username, setUsername] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
+  const [pageLoading, setPageLoading] = useState(true)
+
+  console.log("ProfilePage: Component rendered. sbIsLoading:", sbIsLoading, "user:", !!user);
 
   useEffect(() => {
+    console.log("ProfilePage: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    
     const checkUser = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (!session) {
-        router.push("/auth")
-        return
+      console.log("ProfilePage: checkUser called");
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error("ProfilePage: Error getting session:", error);
+          toast({
+            title: "세션 오류",
+            description: error.message,
+            variant: "destructive",
+          });
+          router.push("/auth");
+          return;
+        }
+        
+        if (!session) {
+          console.log("ProfilePage: No session found, redirecting to /auth");
+          router.push("/auth")
+          return
+        }
+        
+        console.log("ProfilePage: Session found, user ID:", session.user.id);
+        setUser(session.user)
+        await fetchProfile(session.user.id)
+      } catch (error) {
+        console.error("ProfilePage: Exception in checkUser:", error);
+        toast({
+          title: "인증 오류",
+          description: error.message || "세션 확인 중 오류가 발생했습니다.",
+          variant: "destructive",
+        });
+        router.push("/auth");
+      } finally {
+        setPageLoading(false);
       }
-      setUser(session.user)
-      fetchProfile(session.user.id)
     }
 
-    if (!isLoading) {
+    if (!sbIsLoading && supabase) {
+      console.log("ProfilePage: Supabase ready, checking user");
       checkUser()
+    } else if (!supabase && !sbIsLoading) {
+      console.log("ProfilePage: Supabase not available but not loading, redirecting to /auth");
+      router.push("/auth")
+      setPageLoading(false)
     }
-  }, [supabase, router, isLoading])
+  }, [supabase, router, sbIsLoading, toast])
 
   const fetchProfile = async (userId) => {
+    console.log("ProfilePage: fetchProfile called for userId:", userId);
     try {
       const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single()
 
-      if (error) throw error
+      if (error) {
+        console.error("ProfilePage: Error fetching profile:", error);
+        throw error;
+      }
+      
+      console.log("ProfilePage: Profile fetched successfully");
       setProfile(data)
       setUsername(data.username || "")
     } catch (error) {
+      console.error("ProfilePage: Exception in fetchProfile:", error);
       toast({
         title: "프로필 로드 실패",
         description: error.message,
@@ -126,7 +169,8 @@ export default function ProfilePage() {
     }
   }
 
-  if (isLoading || !user || !profile) {
+  if (pageLoading) {
+    console.log("ProfilePage: Rendering loading spinner (pageLoading is true)");
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -134,6 +178,12 @@ export default function ProfilePage() {
     )
   }
 
+  if (!user || !profile) {
+    console.log("ProfilePage: User or profile not loaded after loading completed");
+    return null;
+  }
+
+  console.log("ProfilePage: Rendering main content");
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">내 프로필</h1>

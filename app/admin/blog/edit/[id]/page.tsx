@@ -12,17 +12,31 @@ import { useToast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
+import type { User } from "@supabase/supabase-js"
+
+interface Tag {
+  id: string
+  name: string
+}
+
+interface PostFormData {
+  title: string
+  slug: string
+  summary: string
+  content: string
+  thumbnail_url: string
+}
 
 export default function EditBlogPostPage() {
   const params = useParams()
   const router = useRouter()
   const { supabase, isLoading } = useSupabase()
   const { toast } = useToast()
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [tags, setTags] = useState([])
-  const [selectedTags, setSelectedTags] = useState([])
-  const [formData, setFormData] = useState({
+  const [tags, setTags] = useState<Tag[]>([])
+  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [formData, setFormData] = useState<PostFormData>({
     title: "",
     slug: "",
     summary: "",
@@ -34,6 +48,8 @@ export default function EditBlogPostPage() {
 
   useEffect(() => {
     const checkUser = async () => {
+      if (!supabase) return
+
       const {
         data: { session },
       } = await supabase.auth.getSession()
@@ -47,40 +63,52 @@ export default function EditBlogPostPage() {
       const { data, error } = await supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
 
       if (error || !data || !data.is_admin) {
+        toast({
+          title: "권한 없음",
+          description: "이 페이지에 접근할 권한이 없습니다.",
+          variant: "destructive",
+        })
         router.push("/dashboard")
         return
       }
 
       setIsAdmin(true)
-      fetchTags()
-      fetchPost(params.id)
+      const postId = Array.isArray(params.id) ? params.id[0] : params.id
+      if (postId) {
+        fetchTags()
+        fetchPost(postId)
+      }
     }
 
-    if (!isLoading && params.id) {
+    if (!isLoading && params.id && supabase) {
       checkUser()
     }
-  }, [supabase, router, isLoading, params.id])
+  }, [supabase, router, isLoading, params.id, toast])
 
-  const fetchPost = async (id) => {
+  const fetchPost = async (id: string) => {
+    if (!supabase) return
     try {
-      const { data, error } = await supabase.from("blog_posts").select("*").eq("id", id).single()
+      const { data, error } = await supabase.from("blog_posts").select("*, tags").eq("id", id).single()
 
       if (error) throw error
 
-      setFormData({
-        title: data.title,
-        slug: data.slug,
-        summary: data.summary,
-        content: data.content,
-        thumbnail_url: data.thumbnail_url || "",
-      })
-
-      setSelectedTags(data.tags || [])
-      setIsLoaded(true)
+      if (data) {
+        setFormData({
+          title: data.title || "",
+          slug: data.slug || "",
+          summary: data.summary || "",
+          content: data.content || "",
+          thumbnail_url: data.thumbnail_url || "",
+        })
+        setSelectedTags(Array.isArray(data.tags) ? data.tags.map(String) : [])
+        setIsLoaded(true)
+      } else {
+        throw new Error("게시글 데이터를 찾을 수 없습니다.")
+      }
     } catch (error) {
       toast({
         title: "게시글 로드 실패",
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       })
       router.push("/admin/blog")
@@ -88,6 +116,7 @@ export default function EditBlogPostPage() {
   }
 
   const fetchTags = async () => {
+    if (!supabase) return
     try {
       const { data, error } = await supabase.from("tags").select("*").order("name")
 
@@ -96,23 +125,26 @@ export default function EditBlogPostPage() {
     } catch (error) {
       toast({
         title: "태그 로드 실패",
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       })
     }
   }
 
-  const handleFormChange = (e) => {
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const toggleTag = (tagId) => {
-    setSelectedTags((prev) => (prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]))
+  const toggleTag = (tagId: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    )
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (!supabase) return
 
     // Validate form
     if (!formData.title || !formData.slug || !formData.summary || !formData.content) {
@@ -126,13 +158,17 @@ export default function EditBlogPostPage() {
 
     setIsSubmitting(true)
     try {
+      const postId = Array.isArray(params.id) ? params.id[0] : params.id
+      if (!postId) {
+        throw new Error("게시글 ID가 없습니다.")
+      }
       const { error } = await supabase
         .from("blog_posts")
         .update({
           ...formData,
           tags: selectedTags,
         })
-        .eq("id", params.id)
+        .eq("id", postId)
 
       if (error) throw error
 
@@ -145,7 +181,7 @@ export default function EditBlogPostPage() {
     } catch (error) {
       toast({
         title: "게시글 수정 실패",
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       })
       setIsSubmitting(false)

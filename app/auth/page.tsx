@@ -11,6 +11,7 @@ import { useSupabase } from "@/components/supabase-provider"
 import { useToast } from "@/components/ui/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertCircle } from "lucide-react"
+import type { AuthError, Provider } from '@supabase/supabase-js'
 
 export default function AuthPage() {
   const router = useRouter()
@@ -20,38 +21,73 @@ export default function AuthPage() {
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [error, setError] = useState("")
 
+  console.log("AuthPage: Component rendered. isLoading:", isLoading);
+
   // 에러 파라미터 확인
   useEffect(() => {
+    console.log("AuthPage: Error param effect triggered.");
     const errorParam = searchParams.get("error")
     if (errorParam) {
+      console.log("AuthPage: Error param found:", errorParam);
       setError(decodeURIComponent(errorParam))
     }
   }, [searchParams])
 
   useEffect(() => {
+    console.log(`AuthPage: checkUser effect triggered. isLoading: ${isLoading}`);
     const checkUser = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      if (session) {
-        router.push("/dashboard")
+      console.log("AuthPage: checkUser function called.");
+      if (!supabase) {
+        console.log("AuthPage: supabase client is not available yet.");
+        return;
+      }
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession()
+
+        if (sessionError) {
+          console.error("AuthPage: Error getting session:", sessionError);
+          setError("세션 정보를 가져오는 중 오류가 발생했습니다.");
+          return;
+        }
+
+        if (session) {
+          console.log("AuthPage: Session found. Redirecting to /dashboard.", session);
+          router.push("/dashboard")
+        } else {
+          console.log("AuthPage: No active session found.");
+        }
+      } catch (e: any) {
+        console.error("AuthPage: Exception in checkUser:", e);
+        setError("세션 확인 중 예기치 않은 오류가 발생했습니다.");
       }
     }
 
     if (!isLoading) {
+      console.log("AuthPage: isLoading is false, calling checkUser.");
       checkUser()
+    } else {
+      console.log("AuthPage: isLoading is true, not calling checkUser yet.");
     }
   }, [supabase, router, isLoading])
 
-  const handleSocialLogin = async (provider) => {
+  const handleSocialLogin = async (provider: Provider) => {
     setIsAuthenticating(true)
     setError("")
+    if (!supabase) {
+      console.error("AuthPage: Supabase client not available for social login.")
+      setError("로그인 서비스가 준비되지 않았습니다. 잠시 후 다시 시도해주세요.")
+      setIsAuthenticating(false)
+      return
+    }
     try {
       // 현재 URL을 기반으로 리디렉션 URL 설정
       const redirectTo = `${window.location.origin}/auth/callback`
       console.log("Redirect URL:", redirectTo)
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
           redirectTo,
@@ -60,8 +96,8 @@ export default function AuthPage() {
         },
       })
 
-      if (error) {
-        throw error
+      if (oauthError) {
+        throw oauthError
       }
 
       // 리디렉션 URL이 있으면 사용
@@ -69,14 +105,16 @@ export default function AuthPage() {
         console.log("OAuth URL:", data.url)
         window.location.href = data.url
       }
-    } catch (error) {
-      console.error(`${provider} login error:`, error)
-      setError(error.message || `${provider} 로그인 중 오류가 발생했습니다.`)
+    } catch (err: any) {
+      console.error(`${provider} login error:`, err)
+      const message = (err as AuthError)?.message || (err as Error)?.message || `${provider} 로그인 중 오류가 발생했습니다.`
+      setError(message)
       setIsAuthenticating(false)
     }
   }
 
   if (isLoading) {
+    console.log("AuthPage: Rendering loading state.");
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -84,6 +122,7 @@ export default function AuthPage() {
     )
   }
 
+  console.log("AuthPage: Rendering main content.");
   return (
     <div className="flex justify-center items-center min-h-[calc(100vh-4rem)] bg-[#0a0f1a]">
       <Card className="w-full max-w-md bg-[#0f172a] text-white border border-gray-800">
@@ -117,13 +156,13 @@ export default function AuthPage() {
             Sign in
           </Button>
 
-          <div className="flex items-center gap-2 py-2">
-            <Separator className="flex-grow bg-gray-700" />
-            <span className="text-xs text-gray-400">Login with social accounts</span>
-            <Separator className="flex-grow bg-gray-700" />
+          <div className="flex items-center gap-2 py-2 justify-center">
+            <div className="flex-grow"><Separator className="bg-gray-700" /></div>
+            <span className="text-xs text-gray-400 whitespace-nowrap">소셜 계정으로 로그인</span>
+            <div className="flex-grow"><Separator className="bg-gray-700" /></div>
           </div>
 
-          <div className="flex justify-center gap-4">
+          <div className="flex justify-center gap-4 pt-2">
             <Button
               variant="outline"
               size="icon"
@@ -151,6 +190,7 @@ export default function AuthPage() {
                 <path d="M1 1h22v22H1z" fill="none" />
               </svg>
             </Button>
+            
             <Button
               variant="outline"
               size="icon"
@@ -160,6 +200,17 @@ export default function AuthPage() {
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white">
                 <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.164 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.16 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
+              </svg>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="rounded-full w-10 h-10 bg-[#FEE500] border-transparent hover:bg-[#FEE500]/90"
+              onClick={() => handleSocialLogin("kakao")}
+              disabled={isAuthenticating}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 38 38">
+                <path fill="#000000" d="M19 4.75C10.585 4.75 4 9.955 4 16.64c0 4.335 2.695 8.105 6.69 10.125L9.62 31.5l4.795-2.97c1.4.27 2.86.415 4.36.415 9.415 0 15.225-5.205 15.225-11.89C34.000 9.955 27.415 4.75 19 4.75"/>
               </svg>
             </Button>
           </div>

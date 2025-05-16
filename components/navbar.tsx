@@ -14,51 +14,127 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
+// 사용자 타입 정의
+type UserType = {
+  id: string;
+  email?: string;
+  [key: string]: any;
+}
+
 export default function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<UserType | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const pathname = usePathname()
-  const { supabase } = useSupabase()
+  const { supabase, isLoading: sbIsLoading } = useSupabase()
+
+  console.log("Navbar: Component rendered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
 
   useEffect(() => {
+    console.log("Navbar: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    
+    // supabase가 null이면 리턴합니다
+    if (!supabase) {
+      console.log("Navbar: Supabase client is not available");
+      return;
+    }
+
     const checkUser = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      setUser(session?.user || null)
-
-      if (session?.user) {
-        // Check if user is admin
-        const { data, error } = await supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
-
-        if (!error && data) {
-          setIsAdmin(data.is_admin)
+      try {
+        console.log("Navbar: Checking user session");
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error("Navbar: Error getting session:", error);
+          return;
         }
+        
+        console.log("Navbar: Session found:", !!session);
+        setUser(session?.user || null)
+
+        if (session?.user) {
+          // Check if user is admin
+          try {
+            const { data, error: profileError } = await supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
+
+            if (!profileError && data) {
+              console.log("Navbar: User is admin:", data.is_admin);
+              setIsAdmin(data.is_admin)
+            } else {
+              console.log("Navbar: Profile not found or error:", profileError);
+              // 프로필이 없는 경우 새로 생성
+              if (profileError && profileError.code === 'PGRST116') {
+                console.log("Navbar: Creating new profile for user:", session.user.id);
+                const { error: insertError } = await supabase.from("profiles").insert({
+                  id: session.user.id,
+                  email: session.user.email,
+                  is_admin: false
+                });
+                
+                if (insertError) {
+                  console.error("Navbar: Error creating profile:", insertError);
+                } else {
+                  console.log("Navbar: Profile created successfully");
+                }
+              }
+            }
+          } catch (profileError) {
+            console.error("Navbar: Error checking admin status:", profileError);
+          }
+        }
+      } catch (sessionError) {
+        console.error("Navbar: Session check error:", sessionError);
       }
     }
 
     checkUser()
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user || null)
+    let authListener = null;
+    
+    try {
+      // onAuthStateChange 리스너 설정
+      const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log("Navbar: Auth state changed:", event);
+        setUser(session?.user || null)
 
-      if (session?.user) {
-        const { data } = await supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
-
-        setIsAdmin(data?.is_admin || false)
-      } else {
-        setIsAdmin(false)
-      }
-    })
+        if (session?.user) {
+          try {
+            const { data } = await supabase.from("profiles").select("is_admin").eq("id", session.user.id).single()
+            setIsAdmin(data?.is_admin || false)
+          } catch (error) {
+            console.error("Navbar: Error checking admin status on auth change:", error);
+            setIsAdmin(false);
+          }
+        } else {
+          setIsAdmin(false)
+        }
+      })
+      
+      authListener = listener;
+    } catch (error) {
+      console.error("Navbar: Error setting up auth listener:", error);
+    }
 
     return () => {
-      authListener.subscription.unsubscribe()
+      if (authListener && authListener.subscription) {
+        console.log("Navbar: Unsubscribing from auth listener");
+        authListener.subscription.unsubscribe()
+      }
     }
-  }, [supabase])
+  }, [supabase, sbIsLoading])
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    if (!supabase) {
+      console.error("Navbar: Cannot sign out - Supabase client is not available");
+      return;
+    }
+    
+    try {
+      await supabase.auth.signOut()
+      console.log("Navbar: User signed out");
+    } catch (error) {
+      console.error("Navbar: Error signing out:", error);
+    }
   }
 
   const toggleMenu = () => {
