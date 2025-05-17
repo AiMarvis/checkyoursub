@@ -6,7 +6,14 @@ import { Edit, Trash2, Calendar, CreditCard } from "lucide-react"
 import { format } from "date-fns"
 import { ko } from "date-fns/locale"
 
-export default function SubscriptionCard({ subscription, onEdit, onDelete }) {
+interface SubscriptionCardProps {
+  subscription: any;
+  onEdit: () => void;
+  onDelete: () => void;
+  showNextPayment?: boolean;
+}
+
+export default function SubscriptionCard({ subscription, onEdit, onDelete, showNextPayment = false }: SubscriptionCardProps) {
   const formatDate = (dateString) => {
     const date = new Date(dateString)
     return format(date, "yyyy년 MM월 dd일", { locale: ko })
@@ -36,9 +43,9 @@ export default function SubscriptionCard({ subscription, onEdit, onDelete }) {
       <CardHeader className="pb-2">
         <CardTitle className="flex justify-between items-start">
           <span className="text-xl text-white">{subscription.service_name}</span>
-          {isPaymentSoon() && (
+          {(isPaymentSoon() || showNextPayment) && (
             <span className="text-xs px-2 py-1 bg-red-900/30 text-red-300 border border-red-800 rounded-full">
-              곧 결제
+              {showNextPayment ? "결제 예정" : "곧 결제"}
             </span>
           )}
         </CardTitle>

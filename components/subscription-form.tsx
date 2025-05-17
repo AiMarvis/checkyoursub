@@ -12,7 +12,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns"
 import { CalendarIcon } from "lucide-react"
 
-export default function SubscriptionForm({ subscription, onClose, onSubmit }) {
+interface SubscriptionFormProps {
+  isOpen: boolean;
+  initialData?: any;
+  onClose: () => void;
+  onSubmit: (data: any) => void;
+}
+
+export default function SubscriptionForm({ isOpen, initialData, onClose, onSubmit }: SubscriptionFormProps) {
   const [formData, setFormData] = useState({
     service_name: "",
     amount: "",
@@ -22,14 +29,14 @@ export default function SubscriptionForm({ subscription, onClose, onSubmit }) {
   })
 
   useEffect(() => {
-    if (subscription) {
+    if (initialData) {
       setFormData({
-        ...subscription,
-        amount: subscription.amount.toString(),
-        next_payment_date: new Date(subscription.next_payment_date),
+        ...initialData,
+        amount: initialData.amount.toString(),
+        next_payment_date: new Date(initialData.next_payment_date),
       })
     }
-  }, [subscription])
+  }, [initialData])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -63,10 +70,10 @@ export default function SubscriptionForm({ subscription, onClose, onSubmit }) {
   }
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px] bg-[#0f172a] border border-gray-800 text-white">
         <DialogHeader>
-          <DialogTitle className="text-white">{subscription ? "구독 수정" : "새 구독 추가"}</DialogTitle>
+          <DialogTitle className="text-white">{initialData ? "구독 수정" : "새 구독 추가"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">

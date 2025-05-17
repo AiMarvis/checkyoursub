@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
@@ -20,6 +20,20 @@ export default function AuthPage() {
   const { toast } = useToast()
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [error, setError] = useState("")
+  const [shouldRedirect, setShouldRedirect] = useState(false)
+
+  // 로딩 타임아웃 추가
+  useEffect(() => {
+    // 5초 후에 로딩 상태가 계속되면 리디렉션
+    const timeout = setTimeout(() => {
+      if (isLoading) {
+        console.log("AuthPage: 로딩 타임아웃, 메인 페이지로 리디렉션합니다.");
+        router.push("/");
+      }
+    }, 5000);
+
+    return () => clearTimeout(timeout);
+  }, [isLoading, router]);
 
   console.log("AuthPage: Component rendered. isLoading:", isLoading);
 
@@ -33,45 +47,56 @@ export default function AuthPage() {
     }
   }, [searchParams])
 
-  useEffect(() => {
-    console.log(`AuthPage: checkUser effect triggered. isLoading: ${isLoading}`);
-    const checkUser = async () => {
-      console.log("AuthPage: checkUser function called.");
-      if (!supabase) {
-        console.log("AuthPage: supabase client is not available yet.");
+  // 세션 확인 함수를 useCallback으로 감싸기
+  const checkUser = useCallback(async () => {
+    console.log("AuthPage: checkUser function called.");
+    if (!supabase) {
+      console.log("AuthPage: supabase client is not available yet.");
+      return;
+    }
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession()
+
+      if (sessionError) {
+        console.error("AuthPage: Error getting session:", sessionError);
+        setError("세션 정보를 가져오는 중 오류가 발생했습니다.");
         return;
       }
-      try {
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession()
 
-        if (sessionError) {
-          console.error("AuthPage: Error getting session:", sessionError);
-          setError("세션 정보를 가져오는 중 오류가 발생했습니다.");
-          return;
-        }
-
-        if (session) {
-          console.log("AuthPage: Session found. Redirecting to /dashboard.", session);
-          router.push("/dashboard")
-        } else {
-          console.log("AuthPage: No active session found.");
-        }
-      } catch (e: any) {
-        console.error("AuthPage: Exception in checkUser:", e);
-        setError("세션 확인 중 예기치 않은 오류가 발생했습니다.");
+      if (session) {
+        console.log("AuthPage: Session found. Will redirect to home page.", session);
+        setShouldRedirect(true) // 직접 라우터 호출 대신 상태 설정
+      } else {
+        console.log("AuthPage: No active session found.");
       }
+    } catch (e: any) {
+      console.error("AuthPage: Exception in checkUser:", e);
+      setError("세션 확인 중 예기치 않은 오류가 발생했습니다.");
     }
+  }, [supabase]); // supabase만 의존성으로 추가
 
+  // 세션 확인을 위한 useEffect
+  useEffect(() => {
+    console.log(`AuthPage: checkUser effect triggered. isLoading: ${isLoading}`);
+    
     if (!isLoading) {
       console.log("AuthPage: isLoading is false, calling checkUser.");
       checkUser()
     } else {
       console.log("AuthPage: isLoading is true, not calling checkUser yet.");
     }
-  }, [supabase, router, isLoading])
+  }, [isLoading, checkUser]); // checkUser 함수를 의존성에 추가
+
+  // 리디렉션을 위한 별도 useEffect
+  useEffect(() => {
+    if (shouldRedirect) {
+      console.log("AuthPage: Redirecting to home page via useEffect");
+      router.push("/");
+    }
+  }, [shouldRedirect, router]);
 
   const handleSocialLogin = async (provider: Provider) => {
     setIsAuthenticating(true)

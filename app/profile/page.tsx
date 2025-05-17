@@ -19,77 +19,141 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import type { User } from '@supabase/supabase-js'
+import type { PostgrestError } from '@supabase/supabase-js'
 
 export default function ProfilePage() {
   const router = useRouter()
-  const { supabase, isLoading: sbIsLoading } = useSupabase()
+  const { supabase, isLoading: sbIsLoading, user: providerUser, session: providerSession } = useSupabase()
   const { toast } = useToast()
-  const [user, setUser] = useState(null)
-  const [profile, setProfile] = useState(null)
+  const [user, setUser] = useState<User | null>(providerUser)
+  const [profile, setProfile] = useState<any>(null)
   const [username, setUsername] = useState("")
   const [isUpdating, setIsUpdating] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
 
-  console.log("ProfilePage: Component rendered. sbIsLoading:", sbIsLoading, "user:", !!user);
+  console.log("ProfilePage: Component rendered. sbIsLoading:", sbIsLoading, "user:", !!providerUser);
+
+  // 타임아웃 처리
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (pageLoading) {
+        console.log("ProfilePage: 로딩 타임아웃 발생");
+        setPageLoading(false);
+        
+        // 세션이 없을 경우 홈으로 리디렉션
+        if (!user && !providerUser) {
+          console.log("ProfilePage: 세션 없음, 인증 페이지로 리디렉션");
+          toast({ 
+            title: "로그인이 필요합니다", 
+            description: "프로필에 접근하려면 로그인이 필요합니다.", 
+            variant: "destructive" 
+          });
+          
+          // 타임아웃 후 리디렉션
+          setTimeout(() => {
+            router.push("/auth");
+          }, 2000);
+        }
+      }
+    }, 5000);
+    
+    return () => clearTimeout(timeout);
+  }, [pageLoading, user, providerUser, router, toast]);
 
   useEffect(() => {
     console.log("ProfilePage: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
     
+    if (sbIsLoading) {
+      console.log("ProfilePage: Supabase 로딩 중, 대기 중...");
+      return;
+    }
+    
+    // Provider에서 사용자가 이미 로드된 경우
+    if (providerUser) {
+      console.log("ProfilePage: Provider에서 사용자 발견:", providerUser.id.substring(0, 8));
+      setUser(providerUser);
+      setPageLoading(false);
+      fetchProfile(providerUser.id);
+      return;
+    }
+    
+    // Provider에 사용자가 없는 경우 세션 확인
     const checkUser = async () => {
-      console.log("ProfilePage: checkUser called");
+      if (!supabase) {
+        console.log("ProfilePage: Supabase 클라이언트 없음");
+        setPageLoading(false);
+        return;
+      }
+      
       try {
-        const { data: { session }, error } = await supabase.auth.getSession()
+        console.log("ProfilePage: 세션 가져오기 시도");
+        const { data, error } = await supabase.auth.getSession();
         
         if (error) {
-          console.error("ProfilePage: Error getting session:", error);
-          toast({
-            title: "세션 오류",
-            description: error.message,
-            variant: "destructive",
-          });
-          router.push("/auth");
+          console.error("ProfilePage: 세션 가져오기 오류:", error);
+          setPageLoading(false);
           return;
         }
         
-        if (!session) {
-          console.log("ProfilePage: No session found, redirecting to /auth");
-          router.push("/auth")
-          return
+        if (data?.session?.user) {
+          console.log("ProfilePage: 유효한 세션 발견:", data.session.user.id.substring(0, 8));
+          setUser(data.session.user);
+          fetchProfile(data.session.user.id);
+        } else {
+          console.log("ProfilePage: 세션 없음");
+          // 리디렉션은 타임아웃 처리에서 수행
         }
         
-        console.log("ProfilePage: Session found, user ID:", session.user.id);
-        setUser(session.user)
-        await fetchProfile(session.user.id)
+        setPageLoading(false);
       } catch (error) {
-        console.error("ProfilePage: Exception in checkUser:", error);
-        toast({
-          title: "인증 오류",
-          description: error.message || "세션 확인 중 오류가 발생했습니다.",
-          variant: "destructive",
-        });
-        router.push("/auth");
-      } finally {
+        console.error("ProfilePage: 세션 검증 중 오류:", error);
         setPageLoading(false);
       }
-    }
+    };
+    
+    checkUser();
+  }, [sbIsLoading, supabase, providerUser, providerSession]);
 
-    if (!sbIsLoading && supabase) {
-      console.log("ProfilePage: Supabase ready, checking user");
-      checkUser()
-    } else if (!supabase && !sbIsLoading) {
-      console.log("ProfilePage: Supabase not available but not loading, redirecting to /auth");
-      router.push("/auth")
-      setPageLoading(false)
-    }
-  }, [supabase, router, sbIsLoading, toast])
-
-  const fetchProfile = async (userId) => {
+  const fetchProfile = async (userId: string) => {
+    if (!supabase) return;
+    
     console.log("ProfilePage: fetchProfile called for userId:", userId);
     try {
       const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single()
 
       if (error) {
         console.error("ProfilePage: Error fetching profile:", error);
+        
+        // 프로필이 없으면 생성
+        if (error.code === 'PGRST116' && user) {
+          console.log("ProfilePage: Profile not found, creating new one");
+          const metadata = user.user_metadata || {};
+          const newProfile = {
+            id: userId,
+            email: user.email,
+            username: metadata.name || metadata.user_name || metadata.preferred_username || (user.email ? user.email.split("@")[0] : `user_${userId.substring(0, 8)}`),
+            avatar_url: metadata.avatar_url || metadata.picture,
+            is_admin: false,
+          };
+          
+          const { data: createData, error: createError } = await supabase.from("profiles").insert(newProfile).select();
+          
+          if (createError) {
+            console.error("ProfilePage: Error creating profile:", createError);
+            toast({
+              title: "프로필 생성 실패",
+              description: createError.message,
+              variant: "destructive",
+            });
+          } else if (createData && createData.length > 0) {
+            console.log("ProfilePage: Profile created successfully");
+            setProfile(createData[0]);
+            setUsername(createData[0].username || "");
+            return;
+          }
+        }
+        
         throw error;
       }
       
@@ -98,15 +162,18 @@ export default function ProfilePage() {
       setUsername(data.username || "")
     } catch (error) {
       console.error("ProfilePage: Exception in fetchProfile:", error);
+      const err = error as PostgrestError;
       toast({
         title: "프로필 로드 실패",
-        description: error.message,
+        description: err.message || "프로필을 불러오는 데 실패했습니다",
         variant: "destructive",
       })
     }
   }
 
   const handleUpdateProfile = async () => {
+    if (!user || !supabase) return;
+    
     if (!username.trim()) {
       toast({
         title: "닉네임 필수",
@@ -128,11 +195,12 @@ export default function ProfilePage() {
       })
 
       // Update local state
-      setProfile((prev) => ({ ...prev, username }))
+      setProfile((prev: any) => ({ ...prev, username }))
     } catch (error) {
+      const err = error as PostgrestError;
       toast({
         title: "프로필 업데이트 실패",
-        description: error.message,
+        description: err.message || "프로필 업데이트에 실패했습니다",
         variant: "destructive",
       })
     } finally {
@@ -141,6 +209,8 @@ export default function ProfilePage() {
   }
 
   const handleDeleteAccount = async () => {
+    if (!user || !supabase) return;
+    
     try {
       // First delete user data from profiles table
       const { error: profileError } = await supabase.from("profiles").delete().eq("id", user.id)
@@ -161,9 +231,10 @@ export default function ProfilePage() {
 
       router.push("/")
     } catch (error) {
+      const err = error as Error;
       toast({
         title: "계정 삭제 실패",
-        description: error.message,
+        description: err.message || "계정 삭제에 실패했습니다",
         variant: "destructive",
       })
     }
@@ -180,7 +251,17 @@ export default function ProfilePage() {
 
   if (!user || !profile) {
     console.log("ProfilePage: User or profile not loaded after loading completed");
-    return null;
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex flex-col items-center justify-center min-h-[50vh]">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">로그인이 필요합니다</h2>
+            <p className="mb-6 text-gray-400">프로필을 확인하려면 로그인해 주세요.</p>
+            <Button onClick={() => router.push("/auth")}>로그인 페이지로 이동</Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   console.log("ProfilePage: Rendering main content");
@@ -197,7 +278,7 @@ export default function ProfilePage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">이메일</Label>
-              <Input id="email" value={user.email} disabled className="bg-gray-50 dark:bg-gray-800" />
+              <Input id="email" value={user.email || ''} disabled className="bg-gray-50 dark:bg-gray-800" />
               <p className="text-sm text-gray-500">이메일은 변경할 수 없습니다.</p>
             </div>
             <div className="space-y-2">
@@ -225,7 +306,7 @@ export default function ProfilePage() {
           <CardContent className="space-y-4">
             <div>
               <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
-                로그인 방법: {user.app_metadata.provider === "google" ? "Google" : "카카오"}
+                로그인 방법: {user.app_metadata?.provider === "google" ? "Google" : user.app_metadata?.provider === "github" ? "GitHub" : "카카오"}
               </p>
               <p className="text-sm text-gray-600 dark:text-gray-300">
                 가입일: {new Date(user.created_at).toLocaleDateString()}

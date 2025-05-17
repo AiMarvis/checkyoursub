@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useSupabase } from "@/components/supabase-provider"
 import { Button } from "@/components/ui/button"
@@ -15,9 +15,9 @@ import type { AuthError, User } from '@supabase/supabase-js';
 
 export default function DashboardPage() {
   const router = useRouter()
-  const { supabase, isLoading: sbIsLoading } = useSupabase()
+  const { supabase, isLoading: sbIsLoading, user: providerUser, session: providerSession } = useSupabase()
   const { toast } = useToast()
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<User | null>(providerUser)
   const [subscriptions, setSubscriptions] = useState<any[]>([])
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editingSubscription, setEditingSubscription] = useState<any>(null)
@@ -25,105 +25,130 @@ export default function DashboardPage() {
   const [yearlyTotal, setYearlyTotal] = useState(0)
   const [upcomingPayments, setUpcomingPayments] = useState<any[]>([])
   const [pageLoading, setPageLoading] = useState(true)
-
-  console.log("DashboardPage: Component rendered. sbIsLoading:", sbIsLoading, "User:", user, "pageLoading:", pageLoading);
-
+  
+  // 디버깅을 위한 로그
   useEffect(() => {
-    console.log(`DashboardPage: checkUser effect triggered. sbIsLoading: ${sbIsLoading}, supabase available: ${!!supabase}`);
-    setPageLoading(true)
-    const checkUser = async () => {
-      console.log("DashboardPage: checkUser function called.");
+    console.log("DashboardPage: 초기 렌더링", {
+      sbIsLoading,
+      providerUser: providerUser?.id ? providerUser.id.substring(0, 8) + '...' : 'null',
+      providerSession: providerSession ? '있음' : '없음'
+    });
+  }, [sbIsLoading, providerUser, providerSession]);
+
+  // 타임아웃 처리
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (pageLoading) {
+        console.log("DashboardPage: 로딩 타임아웃 발생");
+        setPageLoading(false);
+        
+        // 세션이 없을 경우 홈으로 리디렉션
+        if (!user && !providerUser) {
+          console.log("DashboardPage: 세션 없음, 홈으로 리디렉션");
+          toast({ 
+            title: "로그인이 필요합니다", 
+            description: "대시보드에 접근하려면 로그인이 필요합니다.", 
+            variant: "destructive" 
+          });
+          
+          // 타임아웃 후 리디렉션
+          setTimeout(() => {
+            router.push("/");
+          }, 2000);
+        }
+      }
+    }, 5000);
+    
+    return () => clearTimeout(timeout);
+  }, [pageLoading, user, providerUser, router, toast]);
+
+  // 세션 검증 및 초기화
+  useEffect(() => {
+    console.log("DashboardPage: 세션 검증 useEffect 실행", { sbIsLoading });
+    
+    if (sbIsLoading) {
+      console.log("DashboardPage: Supabase 로딩 중, 대기 중...");
+      return;
+    }
+    
+    // Provider에서 사용자가 이미 로드된 경우
+    if (providerUser) {
+      console.log("DashboardPage: Provider에서 사용자 발견:", providerUser.id.substring(0, 8));
+      setUser(providerUser);
+      setPageLoading(false);
+      fetchSubscriptions(providerUser);
+      return;
+    }
+    
+    // Provider에 사용자가 없는 경우 세션 확인
+    const checkSession = async () => {
       if (!supabase) {
-        console.log("DashboardPage: supabase client is not available in checkUser.");
+        console.log("DashboardPage: Supabase 클라이언트 없음");
         setPageLoading(false);
         return;
       }
+      
       try {
-        console.log("DashboardPage: Attempting to get session...");
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        console.log("DashboardPage: 세션 가져오기 시도");
+        const { data, error } = await supabase.auth.getSession();
         
-        if (sessionError) {
-          console.error("DashboardPage: Error getting session:", sessionError);
-          toast({ title: "세션 오류", description: sessionError.message, variant: "destructive" });
-          router.push("/auth");
-          return;
-        }
-
-        if (!session) {
-          console.log("DashboardPage: No session found. Redirecting to /auth.");
-          router.push("/auth");
+        if (error) {
+          console.error("DashboardPage: 세션 가져오기 오류:", error);
+          setPageLoading(false);
           return;
         }
         
-        console.log("DashboardPage: Session found. User:", session.user?.id);
-        setUser(session.user);
-        if (session.user?.id) {
-            await fetchSubscriptions(session.user.id);
+        if (data?.session?.user) {
+          console.log("DashboardPage: 유효한 세션 발견:", data.session.user.id.substring(0, 8));
+          setUser(data.session.user);
+          fetchSubscriptions(data.session.user);
+        } else {
+          console.log("DashboardPage: 세션 없음");
+          // 앱 흐름 유지를 위해 여기서 리디렉션하지 않고 상태만 업데이트
         }
-      } catch (e: any) {
-        console.error("DashboardPage: Exception in checkUser:", e);
-        toast({ title: "인증 오류", description: e.message || "알 수 없는 인증 오류가 발생했습니다.", variant: "destructive" });
-      } finally {
+        
+        setPageLoading(false);
+      } catch (error) {
+        console.error("DashboardPage: 세션 검증 중 오류:", error);
         setPageLoading(false);
       }
-    }
+    };
+    
+    checkSession();
+  }, [sbIsLoading, supabase, providerUser]);
 
-    if (!sbIsLoading && supabase) {
-      console.log("DashboardPage: sbIsLoading is false and supabase is available, calling checkUser.");
-      checkUser();
-    } else if (!supabase && !sbIsLoading) {
-        console.log("DashboardPage: Supabase client not available, and not loading from provider. push to /auth");
-        router.push("/auth"); 
-        setPageLoading(false);
-    } else {
-      console.log(`DashboardPage: Not calling checkUser. sbIsLoading: ${sbIsLoading}, supabase available: ${!!supabase}`);
+  const fetchSubscriptions = useCallback(async (currentUser: User | null) => {
+    if (!supabase || !currentUser) {
+      console.log("DashboardPage: 구독 정보를 가져올 수 없음. Supabase 클라이언트 또는 사용자 정보 없음");
+      return;
     }
-  }, [supabase, router, sbIsLoading, toast]);
-
-  const fetchSubscriptions = async (userId: string) => {
-    console.log(`DashboardPage: fetchSubscriptions called for userId: ${userId}`);
-    if (!supabase) {
-        console.log("DashboardPage: supabase client is not available in fetchSubscriptions.");
-        return;
-    }
+    
     try {
-      const { data, error: dbError } = await supabase
+      console.log("DashboardPage: 사용자 구독 정보 가져오기:", currentUser.id.substring(0, 8));
+      const { data, error } = await supabase
         .from("subscriptions")
         .select("*")
-        .eq("user_id", userId)
-        .order("next_payment_date", { ascending: true });
-
-      if (dbError) {
-        console.error("DashboardPage: Error fetching subscriptions:", dbError);
-        if (dbError.message.includes("relation") && dbError.message.includes("does not exist")) {
-          console.warn("DashboardPage: 'subscriptions' table does not exist.");
-          setSubscriptions([]);
-          setMonthlyTotal(0);
-          setYearlyTotal(0);
-          setUpcomingPayments([]);
-          toast({
-            title: "데이터베이스 설정 필요",
-            description: "구독 정보 테이블(subscriptions)이 존재하지 않습니다. Supabase 프로젝트에서 스키마를 확인해주세요.",
-            variant: "destructive",
-          });
-        } else {
-           toast({ title: "구독 정보 로드 오류", description: dbError.message, variant: "destructive" });
-        }
-      } else {
-        console.log("DashboardPage: Subscriptions fetched successfully:", data);
-        setSubscriptions(data || []);
-        calculateTotals(data || []);
-        findUpcomingPayments(data || []);
+        .eq("user_id", currentUser.id);
+        
+      if (error) {
+        console.error("DashboardPage: 구독 정보 가져오기 오류:", error);
+        toast({ title: "구독 정보 오류", description: error.message, variant: "destructive" });
+        return;
       }
-    } catch (e: any) {
-      console.error("DashboardPage: Exception in fetchSubscriptions:", e);
-      toast({
-        title: "구독 정보 로드 실패",
-        description: e.message || "구독 정보를 가져오는 중 알 수 없는 오류가 발생했습니다.",
-        variant: "destructive",
-      });
+      
+      console.log("DashboardPage: 구독 정보 가져오기 성공:", data?.length);
+      setSubscriptions(data || []);
+      
+      // 구독 데이터가 있는 경우 금액 계산
+      if (data && data.length > 0) {
+        calculateTotals(data);
+        calculateUpcomingPayments(data);
+      }
+    } catch (error) {
+      console.error("DashboardPage: fetchSubscriptions 오류:", error);
+      toast({ title: "오류 발생", description: "구독 정보를 가져오는 중 오류가 발생했습니다.", variant: "destructive" });
     }
-  };
+  }, [supabase, toast]);
 
   const calculateTotals = (subs: any[]) => {
     let monthly = 0;
@@ -151,7 +176,7 @@ export default function DashboardPage() {
     setYearlyTotal(yearly);
   };
 
-  const findUpcomingPayments = (subs: any[]) => {
+  const calculateUpcomingPayments = (subs: any[]) => {
     const today = new Date();
     const thirtyDaysLater = new Date();
     thirtyDaysLater.setDate(today.getDate() + 30);
@@ -176,17 +201,17 @@ export default function DashboardPage() {
 
   const handleDeleteSubscription = async (id: string) => {
     if (!user || !user.id || !supabase) {
-        console.warn("DashboardPage: User or Supabase client not available for delete.");
+        console.warn("DashboardPage: 삭제 작업을 위한 사용자 또는 Supabase 클라이언트 없음");
         return;
     }
-    console.log(`DashboardPage: handleDeleteSubscription called for id: ${id}`);
+    console.log(`DashboardPage: 구독 삭제 요청 ID: ${id}`);
     try {
       const { error: deleteError } = await supabase.from("subscriptions").delete().eq("id", id);
       if (deleteError) throw deleteError;
       toast({ title: "구독 삭제 완료", description: "구독 정보가 성공적으로 삭제되었습니다." });
-      await fetchSubscriptions(user.id);
+      await fetchSubscriptions(user);
     } catch (e: any) {
-      console.error("DashboardPage: Exception in handleDeleteSubscription:", e);
+      console.error("DashboardPage: 구독 삭제 중 오류:", e);
       toast({ title: "구독 삭제 실패", description: (e as AuthError)?.message || (e as Error)?.message || "구독 삭제 중 오류 발생", variant: "destructive" });
     }
   };
@@ -198,10 +223,10 @@ export default function DashboardPage() {
 
   const handleFormSubmit = async (formData: any) => {
     if (!user || !user.id || !supabase) {
-        console.warn("DashboardPage: User or Supabase client not available for form submit.");
+        console.warn("DashboardPage: 폼 제출을 위한 사용자 또는 Supabase 클라이언트 없음");
         return;
     }
-    console.log(`DashboardPage: handleFormSubmit called. Editing: ${!!editingSubscription}`);
+    console.log(`DashboardPage: 폼 제출 - 편집 모드: ${!!editingSubscription}`);
     try {
       if (editingSubscription) {
         const { error: updateError } = await supabase.from("subscriptions").update(formData).eq("id", editingSubscription.id);
@@ -214,130 +239,143 @@ export default function DashboardPage() {
       }
       setIsFormOpen(false);
       setEditingSubscription(null);
-      await fetchSubscriptions(user.id);
+      await fetchSubscriptions(user);
     } catch (e: any) {
-      console.error("DashboardPage: Exception in handleFormSubmit:", e);
+      console.error("DashboardPage: 폼 제출 중 오류:", e);
       toast({ title: "구독 저장 실패", description: (e as AuthError)?.message || (e as Error)?.message || "구독 저장 중 오류 발생", variant: "destructive" });
     }
   };
 
-  if (pageLoading) { 
-    console.log("DashboardPage: Rendering loading spinner (pageLoading is true).");
+  // 로딩 상태 표시
+  if (pageLoading) {
     return (
-      <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="container mx-auto py-10">
+        <div className="flex flex-col items-center justify-center min-h-[50vh]">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+          <p className="text-gray-500">로딩 중...</p>
+        </div>
       </div>
     );
   }
-  
+
+  // 로그인되지 않은 상태 처리
   if (!user) {
-    console.log("DashboardPage: Rendering null or redirecting (user is null after loading).");
-    return null; 
+    return (
+      <div className="container mx-auto py-10">
+        <div className="flex flex-col items-center justify-center min-h-[50vh]">
+          <Card className="w-full max-w-md bg-red-900/20 border-red-800">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-300">
+                <AlertCircle size={20} />
+                로그인이 필요합니다
+              </CardTitle>
+              <CardDescription className="text-red-200">
+                대시보드에 접근하려면 로그인이 필요합니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-4">
+                <p className="text-sm text-red-200">로그인 페이지로 이동합니다...</p>
+                <Button onClick={() => router.push("/")} variant="destructive">
+                  홈으로 돌아가기
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
   }
 
-  console.log("DashboardPage: Rendering main content. User:", user?.id);
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold gradient-heading">내 구독 관리</h1>
-          <p className="text-gray-400 mt-2">모든 AI 서비스 구독을 한눈에 관리하세요.</p>
-        </div>
-        <Button onClick={handleAddSubscription} className="mt-4 md:mt-0 gap-2 bg-blue-600 hover:bg-blue-700">
-          <PlusCircle size={16} /> 구독 추가
+    <div className="container mx-auto py-10">
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold gradient-heading">구독 관리 대시보드</h1>
+        <Button onClick={handleAddSubscription} size="sm" className="gap-1 bg-blue-600 hover:bg-blue-700">
+          <PlusCircle size={16} />
+          <span>구독 추가</span>
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <Card className="bg-[#0f172a] border border-gray-800">
+      <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3 mb-10">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg text-white">월 구독 비용</CardTitle>
-            <CardDescription className="text-gray-400">모든 구독의 월간 합계</CardDescription>
+            <CardTitle className="text-base text-gray-400">월간 구독 비용</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-blue-400">{monthlyTotal.toLocaleString()}원</p>
+            <p className="text-3xl font-bold">{monthlyTotal.toLocaleString()}원</p>
           </CardContent>
         </Card>
-        <Card className="bg-[#0f172a] border border-gray-800">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg text-white">연간 구독 비용</CardTitle>
-            <CardDescription className="text-gray-400">모든 구독의 연간 합계</CardDescription>
+            <CardTitle className="text-base text-gray-400">연간 구독 비용</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold text-purple-400">{yearlyTotal.toLocaleString()}원</p>
+            <p className="text-3xl font-bold">{yearlyTotal.toLocaleString()}원</p>
           </CardContent>
         </Card>
-        <Card className="bg-[#0f172a] border border-gray-800">
+        <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-lg text-white">다가오는 결제</CardTitle>
-            <CardDescription className="text-gray-400">30일 이내 결제 예정</CardDescription>
+            <CardTitle className="text-base text-gray-400">활성 구독</CardTitle>
           </CardHeader>
           <CardContent>
-            {upcomingPayments.length > 0 ? (
-              <div className="space-y-2">
-                {upcomingPayments.slice(0, 2).map((sub) => (
-                  <div key={sub.id} className="flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-white">{sub.service_name}</p>
-                      <p className="text-sm text-gray-500">{new Date(sub.next_payment_date).toLocaleDateString()}</p>
-                    </div>
-                    <p className="font-semibold text-cyan-400">{Number.parseFloat(sub.amount).toLocaleString()}원</p>
-                  </div>
-                ))}
-                {upcomingPayments.length > 2 && (
-                  <p className="text-sm text-gray-500 mt-2">외 {upcomingPayments.length - 2}개 더...</p>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center text-gray-500">
-                <AlertCircle size={16} className="mr-2" />
-                <p>30일 이내 예정된 결제가 없습니다.</p>
-              </div>
-            )}
+            <p className="text-3xl font-bold">{subscriptions.length}개</p>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="list" className="mb-8">
-        <TabsList className="bg-[#0f172a] border border-gray-800">
-          <TabsTrigger value="list" className="data-[state=active]:bg-blue-900/30">
-            목록
-          </TabsTrigger>
-          <TabsTrigger value="chart" className="data-[state=active]:bg-blue-900/30">
-            차트
-          </TabsTrigger>
+      <Tabs defaultValue="list">
+        <TabsList>
+          <TabsTrigger value="list">목록 보기</TabsTrigger>
+          <TabsTrigger value="chart">차트 보기</TabsTrigger>
+          <TabsTrigger value="upcoming">결제 예정</TabsTrigger>
         </TabsList>
-        <TabsContent value="list" className="mt-6">
-          {subscriptions.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {subscriptions.map((subscription) => (
+        <TabsContent value="list" className="p-0 mt-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {subscriptions.length === 0 ? (
+              <p className="text-center col-span-full text-gray-400 py-20">등록된 구독이 없습니다. 새 구독을 추가해보세요.</p>
+            ) : (
+              subscriptions.map((subscription) => (
                 <SubscriptionCard
                   key={subscription.id}
                   subscription={subscription}
                   onEdit={() => handleEditSubscription(subscription)}
                   onDelete={() => handleDeleteSubscription(subscription.id)}
                 />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12 bg-[#0f172a] border border-gray-800 rounded-lg">
-              <p className="text-gray-400 mb-4">아직 등록된 구독이 없습니다.</p>
-              <Button onClick={handleAddSubscription} className="gap-2 bg-blue-600 hover:bg-blue-700">
-                <PlusCircle size={16} /> 첫 구독 추가하기
-              </Button>
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </TabsContent>
         <TabsContent value="chart" className="mt-6">
-          <div className="bg-[#0f172a] border border-gray-800 p-6 rounded-lg">
-            <SubscriptionChart subscriptions={subscriptions} />
+          <SubscriptionChart subscriptions={subscriptions} />
+        </TabsContent>
+        <TabsContent value="upcoming" className="mt-6">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {upcomingPayments.length === 0 ? (
+              <p className="text-center col-span-full text-gray-400 py-20">30일 이내에 예정된 결제가 없습니다.</p>
+            ) : (
+              upcomingPayments.map((subscription) => (
+                <SubscriptionCard
+                  key={subscription.id}
+                  subscription={subscription}
+                  onEdit={() => handleEditSubscription(subscription)}
+                  onDelete={() => handleDeleteSubscription(subscription.id)}
+                  showNextPayment
+                />
+              ))
+            )}
           </div>
         </TabsContent>
       </Tabs>
 
       {isFormOpen && (
-        <SubscriptionForm subscription={editingSubscription} onClose={handleFormClose} onSubmit={handleFormSubmit} />
+        <SubscriptionForm
+          isOpen={isFormOpen}
+          onClose={handleFormClose}
+          onSubmit={handleFormSubmit}
+          initialData={editingSubscription}
+        />
       )}
     </div>
-  )
+  );
 }
