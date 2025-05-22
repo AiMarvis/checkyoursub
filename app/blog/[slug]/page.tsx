@@ -14,20 +14,32 @@ import ReactMarkdown from "react-markdown"
 export default function BlogPostPage() {
   const params = useParams()
   const router = useRouter()
-  const { supabase } = useSupabase()
+  const { supabase, isLoading: sbIsLoading, user: providerUser, authHasResolved } = useSupabase()
   const [post, setPost] = useState(null)
   const [tags, setTags] = useState([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [isPostLoading, setIsPostLoading] = useState(true)
+
+  const initialAuthCheckLoading = sbIsLoading || !authHasResolved;
+
+  console.log(`BlogPostPage: Render. slug: ${params.slug}, sbIsLoading: ${sbIsLoading}, authHasResolved: ${authHasResolved}, initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
 
   useEffect(() => {
-    if (params.slug) {
-      fetchPost(params.slug)
-      fetchTags()
+    console.log(`BlogPostPage: Data fetching useEffect. slug: ${params.slug}, initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
+    if (!initialAuthCheckLoading && supabase && params.slug) {
+      console.log("BlogPostPage: Auth resolved, supabase available, slug present. Loading post and tags.");
+      fetchPost(params.slug as string); // Cast params.slug to string
+      fetchTags();
+    } else {
+      console.log("BlogPostPage: Waiting for initial auth check, supabase client, or slug.");
+      if (initialAuthCheckLoading) {
+        // Ensure post loading spinner is active if auth is still pending
+        setIsPostLoading(true);
+      }
     }
-  }, [params.slug])
+  }, [initialAuthCheckLoading, supabase, params.slug]); // Assuming fetchPost/fetchTags are stable
 
-  const fetchPost = async (slug) => {
-    setIsLoading(true)
+  const fetchPost = async (slug: string) => {
+    setIsPostLoading(true);
     try {
       const { data, error } = await supabase
         .from("blog_posts")
@@ -42,9 +54,11 @@ export default function BlogPostPage() {
       setPost(data)
     } catch (error) {
       console.error("Error fetching post:", error)
-      router.push("/blog")
+      // Only redirect if it's not a "not found" type error, or handle not found explicitly
+      // For now, keeping existing redirect logic on any error.
+      router.push("/blog") 
     } finally {
-      setIsLoading(false)
+      setIsPostLoading(false);
     }
   }
 
@@ -63,7 +77,8 @@ export default function BlogPostPage() {
     return format(new Date(dateString), "yyyy년 MM월 dd일", { locale: ko })
   }
 
-  if (isLoading) {
+  if (initialAuthCheckLoading || isPostLoading) {
+    console.log(`BlogPostPage: Rendering loading spinner. initialAuthCheckLoading: ${initialAuthCheckLoading}, isPostLoading: ${isPostLoading}`);
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -71,7 +86,10 @@ export default function BlogPostPage() {
     )
   }
 
+  // This check should come after the loading state.
+  // If initialAuthCheckLoading is false, and isPostLoading is false, and still no post, then it's truly not found.
   if (!post) {
+    console.log("BlogPostPage: Post not found after loading completed.");
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="text-center py-12">
