@@ -8,30 +8,36 @@ import { Search } from "lucide-react"
 import Card3D from "@/components/3d-card"
 
 export default function ToolsPage() {
-  const { supabase, isLoading: sbIsLoading } = useSupabase()
+  const { supabase, isLoading: sbIsLoading, user: providerUser, authHasResolved } = useSupabase()
   const [tools, setTools] = useState([])
   const [categories, setCategories] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
-  const [isLoading, setIsLoading] = useState(true)
+  const [isDataLoading, setIsDataLoading] = useState(true)
   const [activeCategory, setActiveCategory] = useState("all")
 
-  console.log("ToolsPage: Component rendered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+  const initialAuthCheckLoading = sbIsLoading || !authHasResolved;
+
+  console.log(`ToolsPage: Render. sbIsLoading: ${sbIsLoading}, authHasResolved: ${authHasResolved}, initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
 
   useEffect(() => {
-    console.log("ToolsPage: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    console.log(`ToolsPage: Data fetching useEffect. initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
     
-    if (!sbIsLoading && supabase) {
-      console.log("ToolsPage: Loading data - supabase is available and not loading");
-      fetchTools()
-      fetchCategories()
+    if (!initialAuthCheckLoading && supabase) {
+      console.log("ToolsPage: Auth resolved, supabase available. Loading data.");
+      fetchTools();
+      fetchCategories();
     } else {
-      console.log("ToolsPage: Waiting for supabase - sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+      console.log(`ToolsPage: Waiting for initial auth check or supabase client. initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
+      if (initialAuthCheckLoading) {
+        // Ensure data loading spinner is active if auth is still pending
+        setIsDataLoading(true);
+      }
     }
-  }, [sbIsLoading, supabase])
+  }, [initialAuthCheckLoading, supabase]); // Assuming fetchTools/fetchCategories are stable
 
   const fetchTools = async () => {
     console.log("ToolsPage: fetchTools called");
-    setIsLoading(true)
+    setIsDataLoading(true);
     try {
       const { data, error } = await supabase.from("ai_tools").select("*").order("name")
 
@@ -51,7 +57,7 @@ export default function ToolsPage() {
     } catch (error) {
       console.error("ToolsPage: Exception in fetchTools:", error)
     } finally {
-      setIsLoading(false)
+      setIsDataLoading(false);
     }
   }
 
@@ -96,8 +102,8 @@ export default function ToolsPage() {
     setActiveCategory(value)
   }
 
-  if (isLoading) {
-    console.log("ToolsPage: Rendering loading spinner (isLoading is true)");
+  if (initialAuthCheckLoading || isDataLoading) {
+    console.log(`ToolsPage: Rendering loading spinner. initialAuthCheckLoading: ${initialAuthCheckLoading}, isDataLoading: ${isDataLoading}`);
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>

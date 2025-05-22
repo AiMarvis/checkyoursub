@@ -10,6 +10,7 @@ interface SupabaseContextType {
   isLoading: boolean;
   user: User | null;
   session: Session | null;
+  authHasResolved: boolean;
 }
 
 const SupabaseContext = createContext<SupabaseContextType | null>(null)
@@ -19,6 +20,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [authHasResolved, setAuthHasResolved] = useState(false);
 
   useEffect(() => {
     try {
@@ -32,6 +34,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
         setSession(currentSession);
         setUser(currentSession?.user || null);
         setIsLoading(false);
+        setAuthHasResolved(true);
       });
       
       // 인증 상태 변경 리스너 설정
@@ -53,7 +56,7 @@ export function SupabaseProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <SupabaseContext.Provider value={{ supabase, isLoading, user, session }}>
+    <SupabaseContext.Provider value={{ supabase, isLoading, user, session, authHasResolved }}>
       {children}
     </SupabaseContext.Provider>
   );

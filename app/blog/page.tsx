@@ -11,30 +11,36 @@ import { ko } from "date-fns/locale"
 import BlogCard from "@/components/blog-card"
 
 export default function BlogPage() {
-  const { supabase, isLoading: sbIsLoading } = useSupabase()
+  const { supabase, isLoading: sbIsLoading, user: providerUser, authHasResolved } = useSupabase()
   const [posts, setPosts] = useState([])
   const [tags, setTags] = useState([])
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedTag, setSelectedTag] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isDataLoading, setIsDataLoading] = useState(true)
 
-  console.log("BlogPage: Component rendered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+  const initialAuthCheckLoading = sbIsLoading || !authHasResolved;
+
+  console.log(`BlogPage: Render. sbIsLoading: ${sbIsLoading}, authHasResolved: ${authHasResolved}, initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
 
   useEffect(() => {
-    console.log("BlogPage: useEffect triggered. sbIsLoading:", sbIsLoading, "supabase:", !!supabase);
+    console.log(`BlogPage: Data fetching useEffect. initialAuthCheckLoading: ${initialAuthCheckLoading}, supabase: ${!!supabase}`);
     
-    if (!sbIsLoading && supabase) {
-      console.log("BlogPage: Loading data - supabase is available and not loading");
-      fetchPosts()
-      fetchTags()
+    if (!initialAuthCheckLoading && supabase) {
+      console.log("BlogPage: Auth resolved, supabase available. Loading data.");
+      fetchPosts();
+      fetchTags();
     } else {
-      console.log("BlogPage: Waiting for supabase - sbIsLoading:", sbIsLoading);
+      console.log("BlogPage: Waiting for initial auth check or supabase client.");
+      if (initialAuthCheckLoading) {
+        // Ensure data loading spinner is active if auth is still pending
+        setIsDataLoading(true); 
+      }
     }
-  }, [sbIsLoading, supabase])
+  }, [initialAuthCheckLoading, supabase]); // Assuming fetchPosts/fetchTags are stable or correctly handled if they cause re-runs
 
   const fetchPosts = async () => {
     console.log("BlogPage: fetchPosts called");
-    setIsLoading(true)
+    setIsDataLoading(true);
     try {
       const { data, error } = await supabase
         .from("blog_posts")
@@ -60,7 +66,7 @@ export default function BlogPage() {
     } catch (error) {
       console.error("BlogPage: Exception in fetchPosts:", error)
     } finally {
-      setIsLoading(false)
+      setIsDataLoading(false);
     }
   }
 
@@ -112,8 +118,8 @@ export default function BlogPage() {
     return matchesSearch && matchesTag
   })
 
-  if (isLoading) {
-    console.log("BlogPage: Rendering loading spinner (isLoading is true)");
+  if (initialAuthCheckLoading || isDataLoading) {
+    console.log(`BlogPage: Rendering loading spinner. initialAuthCheckLoading: ${initialAuthCheckLoading}, isDataLoading: ${isDataLoading}`);
     return (
       <div className="flex justify-center items-center min-h-[calc(100vh-4rem)]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
